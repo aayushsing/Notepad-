@@ -2,22 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Interactive Whiteboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Whiteboard with TensorFlow.js Recognition</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
   <style>
-    body { display:flex; flex-direction:column; align-items:center; background:#f5f5f5; margin:0; font-family:sans-serif; }
-    h1 { margin:10px; font-size:1.4rem; text-align:center; }
-    #toolbar { margin:8px; display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
-    canvas { background:#fff; border:5px solid #000; touch-action:none; } /* touch-action disables scrolling on touch */
-    button, input[type=color], select { padding:6px; font-size:1rem; }
+    body { margin:0; font-family:sans-serif; background:#f0f0f0; display:flex; flex-direction:column; align-items:center; }
+    h1 { margin:10px; font-size:1.4rem; }
+    #toolbar { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:10px; }
+    #boardContainer { width:95vw; height:70vh; border:5px solid #000; overflow-y:scroll; background:#fff; }
+    canvas { background:#fff; touch-action:none; display:block; }
+    button, input, select { padding:6px; font-size:1rem; }
     #fileList { margin-top:10px; font-size:0.9rem; }
-    @media (max-width: 768px) {
-      canvas { width:95vw; height:60vh; }
-    }
   </style>
 </head>
 <body>
-  <h1>Interactive Whiteboard</h1>
+  <h1>Whiteboard with TensorFlow.js Recognition</h1>
   <div id="toolbar">
     <label>Color: <input type="color" id="colorPicker" value="#000000"></label>
     <label>Size:
@@ -30,8 +29,11 @@
     <button id="clearBoard">Clear</button>
     <button id="toggleSpeak">🔊 Speak: On</button>
     <button id="saveBtn">💾 Save</button>
+    <button id="newPage">➕ New Page</button>
   </div>
-  <canvas id="board" width="900" height="500"></canvas>
+  <div id="boardContainer">
+    <canvas id="board" width="900" height="2000"></canvas>
+  </div>
   <div id="fileList"></div>
 
   <script>
@@ -41,7 +43,14 @@
     const sizePicker = document.getElementById('sizePicker');
     const toggleSpeakBtn = document.getElementById('toggleSpeak');
     const fileList = document.getElementById('fileList');
-    let drawing = false, speakEnabled = true, erasing = false;
+    let drawing = false, erasing = false, speakEnabled = true, model;
+
+    async function loadModel() {
+      // Pre-trained MNIST model from TensorFlow.js examples
+      model = await tf.loadLayersModel('https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json');
+      console.log("Model loaded");
+    }
+    loadModel();
 
     function speak(text) {
       if (!speakEnabled) return;
@@ -51,30 +60,22 @@
 
     function getPos(evt) {
       const rect = canvas.getBoundingClientRect();
-      if (evt.touches) {
-        return {
-          x: evt.touches[0].clientX - rect.left,
-          y: evt.touches[0].clientY - rect.top
-        };
-      } else {
-        return {
-          x: evt.clientX - rect.left,
-          y: evt.clientY - rect.top
-        };
-      }
+      const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+      const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
+      return { x: clientX - rect.left, y: clientY - rect.top };
     }
 
-    function startDraw(evt) {
+    function startDraw(e) {
       drawing = true;
-      const pos = getPos(evt);
+      const pos = getPos(e);
       ctx.beginPath();
       ctx.moveTo(pos.x, pos.y);
-      evt.preventDefault();
+      e.preventDefault();
     }
 
-    function draw(evt) {
+    function draw(e) {
       if (!drawing) return;
-      const pos = getPos(evt);
+      const pos = getPos(e);
       ctx.lineWidth = erasing ? 20 : parseInt(sizePicker.value);
       ctx.lineCap = "round";
       ctx.strokeStyle = erasing ? "#fff" : colorPicker.value;
@@ -82,15 +83,39 @@
       ctx.stroke();
       ctx.beginPath();
       ctx.moveTo(pos.x, pos.y);
-      evt.preventDefault();
+      e.preventDefault();
     }
 
     function endDraw() {
       if (drawing) {
         drawing = false;
         ctx.beginPath();
-        speak("Drawing completed");
+        recognizeDrawing();
       }
+    }
+
+    async function recognizeDrawing() {
+      if (!model) { speak("Model not loaded yet"); return; }
+
+      // Create a small offscreen canvas to extract the drawn content
+      const tmp = document.createElement('canvas');
+      const size = 28;
+      tmp.width = size; tmp.height = size;
+      const tctx = tmp.getContext('2d');
+
+      // Get bounding box of non-white pixels
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      // Draw entire board scaled down
+      tctx.drawImage(canvas, 0, 0, size, size);
+      const img = tf.browser.fromPixels(tmp,1)
+        .mean(2)
+        .toFloat()
+        .div(255)
+        .reshape([1, size, size, 1]);
+      const prediction = model.predict(img);
+      const digit = prediction.argMax(1).dataSync()[0];
+
+      speak(digit);
     }
 
     // Mouse events
@@ -112,19 +137,6 @@
       toggleSpeakBtn.textContent = speakEnabled ? "🔊 Speak: On" : "🔇 Speak: Off";
     };
 
-    // Drag and drop image (desktop)
-    canvas.addEventListener('dragover', e => e.preventDefault());
-    canvas.addEventListener('drop', e => {
-      e.preventDefault();
-      const file = e.dataTransfer.files[0];
-      if(file && file.type.startsWith('image/')){
-        const img = new Image();
-        img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        img.src = URL.createObjectURL(file);
-      }
-    });
-
-    // Save drawing locally
     document.getElementById('saveBtn').onclick = () => {
       const dataURL = canvas.toDataURL('image/png');
       const a = document.createElement('a');
@@ -137,14 +149,22 @@
       fileList.appendChild(li);
     };
 
-    // Resize canvas on mobile rotation
-    window.addEventListener('resize', () => {
-      if (window.innerWidth < 768) {
-        canvas.width = window.innerWidth * 0.95;
-        canvas.height = window.innerHeight * 0.6;
-      } else {
-        canvas.width = 900;
-        canvas.height = 500;
+    document.getElementById('newPage').onclick = () => {
+      const newHeight = canvas.height + 2000;
+      const imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
+      canvas.height = newHeight;
+      ctx.putImageData(imgData,0,0);
+    };
+
+    // Drag and drop image
+    canvas.addEventListener('dragover', e => e.preventDefault());
+    canvas.addEventListener('drop', e => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if(file && file.type.startsWith('image/')){
+        const img = new Image();
+        img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        img.src = URL.createObjectURL(file);
       }
     });
   </script>
