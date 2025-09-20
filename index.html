@@ -2,28 +2,44 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Whiteboard with TensorFlow.js Recognition</title>
+  <title>Advanced Whiteboard with Fill</title>
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
   <style>
     body { margin:0; font-family:sans-serif; background:#f0f0f0; display:flex; flex-direction:column; align-items:center; }
     h1 { margin:10px; font-size:1.4rem; }
     #toolbar { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:10px; }
-    #boardContainer { width:95vw; height:70vh; border:5px solid #000; overflow-y:scroll; background:#fff; }
+    #boardContainer { width:95vw; height:70vh; border:5px solid #000; overflow:auto; background:#fff; }
     canvas { background:#fff; touch-action:none; display:block; }
-    button, input, select { padding:6px; font-size:1rem; }
+    button, input, select, label { padding:4px; font-size:1rem; }
     #fileList { margin-top:10px; font-size:0.9rem; }
   </style>
 </head>
 <body>
-  <h1>Whiteboard with TensorFlow.js Recognition</h1>
+  <h1>Whiteboard with Fill Shapes</h1>
   <div id="toolbar">
-    <label>Color: <input type="color" id="colorPicker" value="#000000"></label>
-    <label>Size:
+    <label>Color:<input type="color" id="colorPicker" value="#000000"></label>
+    <label>Line Size:
       <select id="sizePicker">
         <option>2</option><option>4</option><option>6</option>
-        <option selected>8</option><option>12</option><option>16</option>
+        <option selected>8</option><option>12</option><option>16</option><option>24</option><option>32</option>
       </select>
+    </label>
+    <label>Eraser Size:
+      <select id="eraserSize">
+        <option>10</option><option>20</option><option selected>30</option><option>40</option><option>60</option>
+      </select>
+    </label>
+    <label>Shape:
+      <select id="shapePicker">
+        <option value="freehand">Freehand</option>
+        <option value="line">Straight Line</option>
+        <option value="rect">Rectangle</option>
+        <option value="circle">Circle</option>
+      </select>
+    </label>
+    <label>Fill:
+      <input type="checkbox" id="fillToggle">
     </label>
     <button id="eraser">Eraser</button>
     <button id="clearBoard">Clear</button>
@@ -32,7 +48,7 @@
     <button id="newPage">➕ New Page</button>
   </div>
   <div id="boardContainer">
-    <canvas id="board" width="900" height="2000"></canvas>
+    <canvas id="board" width="2000" height="2000"></canvas>
   </div>
   <div id="fileList"></div>
 
@@ -41,130 +57,139 @@
     const ctx = canvas.getContext('2d');
     const colorPicker = document.getElementById('colorPicker');
     const sizePicker = document.getElementById('sizePicker');
+    const eraserSizePicker = document.getElementById('eraserSize');
+    const shapePicker = document.getElementById('shapePicker');
+    const fillToggle = document.getElementById('fillToggle');
     const toggleSpeakBtn = document.getElementById('toggleSpeak');
     const fileList = document.getElementById('fileList');
-    let drawing = false, erasing = false, speakEnabled = true, model;
+    let drawing=false, erasing=false, speakEnabled=true, model;
+    let startX=0,startY=0,tempImage;
 
     async function loadModel() {
-      // Pre-trained MNIST model from TensorFlow.js examples
       model = await tf.loadLayersModel('https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json');
-      console.log("Model loaded");
     }
     loadModel();
 
-    function speak(text) {
-      if (!speakEnabled) return;
-      const utterance = new SpeechSynthesisUtterance(text);
-      speechSynthesis.speak(utterance);
+    function speak(text){
+      if(!speakEnabled) return;
+      const utter=new SpeechSynthesisUtterance(text);
+      speechSynthesis.speak(utter);
     }
 
-    function getPos(evt) {
-      const rect = canvas.getBoundingClientRect();
-      const clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
-      const clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
-      return { x: clientX - rect.left, y: clientY - rect.top };
+    function getPos(e){
+      const rect=canvas.getBoundingClientRect();
+      const clientX=e.touches?e.touches[0].clientX:e.clientX;
+      const clientY=e.touches?e.touches[0].clientY:e.clientY;
+      return {x:clientX-rect.left,y:clientY-rect.top};
     }
 
-    function startDraw(e) {
-      drawing = true;
-      const pos = getPos(e);
+    function startDraw(e){
+      drawing=true;
+      const pos=getPos(e);
+      startX=pos.x;startY=pos.y;
+      if(shapePicker.value!=='freehand') tempImage=ctx.getImageData(0,0,canvas.width,canvas.height);
       ctx.beginPath();
-      ctx.moveTo(pos.x, pos.y);
+      ctx.moveTo(pos.x,pos.y);
       e.preventDefault();
     }
 
-    function draw(e) {
-      if (!drawing) return;
-      const pos = getPos(e);
-      ctx.lineWidth = erasing ? 20 : parseInt(sizePicker.value);
-      ctx.lineCap = "round";
-      ctx.strokeStyle = erasing ? "#fff" : colorPicker.value;
-      ctx.lineTo(pos.x, pos.y);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(pos.x, pos.y);
-      e.preventDefault();
-    }
-
-    function endDraw() {
-      if (drawing) {
-        drawing = false;
+    function draw(e){
+      if(!drawing) return;
+      const pos=getPos(e);
+      const lineWidth=erasing?parseInt(eraserSizePicker.value):parseInt(sizePicker.value);
+      ctx.lineWidth=lineWidth;
+      ctx.lineCap="round";
+      ctx.strokeStyle=erasing?"#fff":colorPicker.value;
+      ctx.fillStyle=colorPicker.value;
+      if(shapePicker.value==='freehand'){
+        ctx.lineTo(pos.x,pos.y);
+        ctx.stroke();
         ctx.beginPath();
-        recognizeDrawing();
+        ctx.moveTo(pos.x,pos.y);
+      } else {
+        ctx.putImageData(tempImage,0,0);
+        ctx.beginPath();
+        if(shapePicker.value==='line'){
+          ctx.moveTo(startX,startY);
+          ctx.lineTo(pos.x,pos.y);
+          ctx.stroke();
+        } else if(shapePicker.value==='rect'){
+          if(fillToggle.checked){
+            ctx.fillRect(startX,startY,pos.x-startX,pos.y-startY);
+          }
+          ctx.rect(startX,startY,pos.x-startX,pos.y-startY);
+          ctx.stroke();
+        } else if(shapePicker.value==='circle'){
+          const r=Math.sqrt((pos.x-startX)**2+(pos.y-startY)**2);
+          ctx.arc(startX,startY,r,0,Math.PI*2);
+          if(fillToggle.checked) ctx.fill();
+          ctx.stroke();
+        }
+      }
+      e.preventDefault();
+    }
+
+    function endDraw(){
+      if(drawing){
+        drawing=false;
+        ctx.beginPath();
+        if(shapePicker.value==='freehand') recognizeDrawing();
       }
     }
 
-    async function recognizeDrawing() {
-      if (!model) { speak("Model not loaded yet"); return; }
-
-      // Create a small offscreen canvas to extract the drawn content
-      const tmp = document.createElement('canvas');
-      const size = 28;
-      tmp.width = size; tmp.height = size;
-      const tctx = tmp.getContext('2d');
-
-      // Get bounding box of non-white pixels
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      // Draw entire board scaled down
-      tctx.drawImage(canvas, 0, 0, size, size);
-      const img = tf.browser.fromPixels(tmp,1)
-        .mean(2)
-        .toFloat()
-        .div(255)
-        .reshape([1, size, size, 1]);
-      const prediction = model.predict(img);
-      const digit = prediction.argMax(1).dataSync()[0];
-
+    async function recognizeDrawing(){
+      if(!model) return;
+      const tmp=document.createElement('canvas');
+      const size=28;
+      tmp.width=size;tmp.height=size;
+      const tctx=tmp.getContext('2d');
+      tctx.drawImage(canvas,0,0,size,size);
+      const img=tf.browser.fromPixels(tmp,1).mean(2).toFloat().div(255).reshape([1,size,size,1]);
+      const prediction=model.predict(img);
+      const digit=prediction.argMax(1).dataSync()[0];
       speak(digit);
     }
 
-    // Mouse events
-    canvas.addEventListener('mousedown', startDraw);
-    canvas.addEventListener('mousemove', draw);
-    canvas.addEventListener('mouseup', endDraw);
-    canvas.addEventListener('mouseout', endDraw);
+    // Events
+    canvas.addEventListener('mousedown',startDraw);
+    canvas.addEventListener('mousemove',draw);
+    canvas.addEventListener('mouseup',endDraw);
+    canvas.addEventListener('mouseout',endDraw);
+    canvas.addEventListener('touchstart',startDraw,{passive:false});
+    canvas.addEventListener('touchmove',draw,{passive:false});
+    canvas.addEventListener('touchend',endDraw);
 
-    // Touch events
-    canvas.addEventListener('touchstart', startDraw, { passive:false });
-    canvas.addEventListener('touchmove', draw, { passive:false });
-    canvas.addEventListener('touchend', endDraw);
-
-    document.getElementById('eraser').onclick = () => { erasing = !erasing; };
-    document.getElementById('clearBoard').onclick = () => ctx.clearRect(0,0,canvas.width,canvas.height);
-
-    toggleSpeakBtn.onclick = () => {
-      speakEnabled = !speakEnabled;
-      toggleSpeakBtn.textContent = speakEnabled ? "🔊 Speak: On" : "🔇 Speak: Off";
+    document.getElementById('eraser').onclick=()=>{erasing=!erasing;};
+    document.getElementById('clearBoard').onclick=()=>ctx.clearRect(0,0,canvas.width,canvas.height);
+    toggleSpeakBtn.onclick=()=>{
+      speakEnabled=!speakEnabled;
+      toggleSpeakBtn.textContent=speakEnabled?"🔊 Speak: On":"🔇 Speak: Off";
     };
-
-    document.getElementById('saveBtn').onclick = () => {
-      const dataURL = canvas.toDataURL('image/png');
-      const a = document.createElement('a');
-      const fileName = `drawing-${Date.now()}.png`;
-      a.href = dataURL;
-      a.download = fileName;
-      a.click();
-      const li = document.createElement('div');
-      li.textContent = `Saved: ${fileName}`;
+    document.getElementById('saveBtn').onclick=()=>{
+      const dataURL=canvas.toDataURL('image/png');
+      const a=document.createElement('a');
+      const fileName=`drawing-${Date.now()}.png`;
+      a.href=dataURL;a.download=fileName;a.click();
+      const li=document.createElement('div');
+      li.textContent=`Saved: ${fileName}`;
       fileList.appendChild(li);
     };
-
-    document.getElementById('newPage').onclick = () => {
-      const newHeight = canvas.height + 2000;
-      const imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
-      canvas.height = newHeight;
+    document.getElementById('newPage').onclick=()=>{
+      const newHeight=canvas.height+2000;
+      const imgData=ctx.getImageData(0,0,canvas.width,canvas.height);
+      canvas.height=newHeight;
       ctx.putImageData(imgData,0,0);
     };
 
-    // Drag and drop image
-    canvas.addEventListener('dragover', e => e.preventDefault());
-    canvas.addEventListener('drop', e => {
+    // Drag and drop images
+    canvas.addEventListener('dragover',e=>e.preventDefault());
+    canvas.addEventListener('drop',e=>{
       e.preventDefault();
-      const file = e.dataTransfer.files[0];
+      const file=e.dataTransfer.files[0];
       if(file && file.type.startsWith('image/')){
-        const img = new Image();
-        img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        img.src = URL.createObjectURL(file);
+        const img=new Image();
+        img.onload=()=>ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        img.src=URL.createObjectURL(file);
       }
     });
   </script>
