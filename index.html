@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Interactive Whiteboard</title>
+  <style>
+    body { display:flex; flex-direction:column; align-items:center; background:#f5f5f5; font-family:sans-serif; margin:0; }
+    h1 { margin:10px; }
+    #toolbar { margin:10px; display:flex; gap:10px; flex-wrap:wrap; }
+    canvas { background:#fff; border:5px solid #000; cursor:crosshair; }
+    input[type=color], button, select { padding:5px; }
+    #fileList { margin-top:10px; font-size:14px; }
+  </style>
+</head>
+<body>
+  <h1>Interactive Whiteboard</h1>
+  <div id="toolbar">
+    <label>Pen Color: <input type="color" id="colorPicker" value="#000000"></label>
+    <label>Size: 
+      <select id="sizePicker">
+        <option>2</option><option>4</option><option>6</option>
+        <option selected>8</option><option>12</option><option>16</option>
+      </select>
+    </label>
+    <button id="eraser">Eraser</button>
+    <button id="clearBoard">Clear</button>
+    <button id="toggleSpeak">🔊 Speak: On</button>
+    <button id="saveBtn">💾 Save</button>
+  </div>
+  <canvas id="board" width="900" height="500"></canvas>
+  <div id="fileList"></div>
+
+  <script>
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+    const colorPicker = document.getElementById('colorPicker');
+    const sizePicker = document.getElementById('sizePicker');
+    const toggleSpeakBtn = document.getElementById('toggleSpeak');
+    const fileList = document.getElementById('fileList');
+    let drawing = false, speakEnabled = true, erasing = false;
+
+    function speak(text) {
+      if (!speakEnabled) return;
+      const utterance = new SpeechSynthesisUtterance(text);
+      speechSynthesis.speak(utterance);
+    }
+
+    canvas.addEventListener('mousedown', e => { drawing=true; draw(e); });
+    canvas.addEventListener('mouseup', ()=> drawing=false);
+    canvas.addEventListener('mouseout', ()=> drawing=false);
+    canvas.addEventListener('mousemove', draw);
+
+    function draw(e){
+      if(!drawing) return;
+      ctx.lineWidth = erasing ? 20 : parseInt(sizePicker.value);
+      ctx.lineCap = "round";
+      ctx.strokeStyle = erasing ? "#fff" : colorPicker.value;
+
+      const rect = canvas.getBoundingClientRect();
+      ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+
+      // rudimentary recognition: if a single character is drawn and mouse up quickly, try to guess
+    }
+
+    // Clear path on mouseup for recognition
+    canvas.addEventListener('mouseup', () => {
+      ctx.beginPath();
+      // Placeholder recognition: simulate recognizing single letters/digits based on random pick (demo)
+      // In production, integrate a handwriting recognition library like tensorflow.js
+      // Here, we just speak "number" or "letter drawn" for demonstration
+      speak("Drawing completed");
+    });
+
+    document.getElementById('eraser').onclick = ()=> { erasing = !erasing; };
+    document.getElementById('clearBoard').onclick = ()=> {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+    };
+
+    toggleSpeakBtn.onclick = () => {
+      speakEnabled = !speakEnabled;
+      toggleSpeakBtn.textContent = speakEnabled ? "🔊 Speak: On" : "🔇 Speak: Off";
+    };
+
+    // Drag and drop image support
+    canvas.addEventListener('dragover', e => e.preventDefault());
+    canvas.addEventListener('drop', e => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      if(file && file.type.startsWith('image/')){
+        const img = new Image();
+        img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        img.src = URL.createObjectURL(file);
+      }
+    });
+
+    // Save drawing locally
+    document.getElementById('saveBtn').onclick = () => {
+      const dataURL = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataURL;
+      const fileName = `drawing-${Date.now()}.png`;
+      a.download = fileName;
+      a.click();
+      const li = document.createElement('div');
+      li.textContent = `Saved: ${fileName}`;
+      fileList.appendChild(li);
+    };
+  </script>
+</body>
+</html>
