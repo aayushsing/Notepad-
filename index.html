@@ -3,20 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <title>Interactive Whiteboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { display:flex; flex-direction:column; align-items:center; background:#f5f5f5; font-family:sans-serif; margin:0; }
-    h1 { margin:10px; }
-    #toolbar { margin:10px; display:flex; gap:10px; flex-wrap:wrap; }
-    canvas { background:#fff; border:5px solid #000; cursor:crosshair; }
-    input[type=color], button, select { padding:5px; }
-    #fileList { margin-top:10px; font-size:14px; }
+    body { display:flex; flex-direction:column; align-items:center; background:#f5f5f5; margin:0; font-family:sans-serif; }
+    h1 { margin:10px; font-size:1.4rem; text-align:center; }
+    #toolbar { margin:8px; display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+    canvas { background:#fff; border:5px solid #000; touch-action:none; } /* touch-action disables scrolling on touch */
+    button, input[type=color], select { padding:6px; font-size:1rem; }
+    #fileList { margin-top:10px; font-size:0.9rem; }
+    @media (max-width: 768px) {
+      canvas { width:95vw; height:60vh; }
+    }
   </style>
 </head>
 <body>
   <h1>Interactive Whiteboard</h1>
   <div id="toolbar">
-    <label>Pen Color: <input type="color" id="colorPicker" value="#000000"></label>
-    <label>Size: 
+    <label>Color: <input type="color" id="colorPicker" value="#000000"></label>
+    <label>Size:
       <select id="sizePicker">
         <option>2</option><option>4</option><option>6</option>
         <option selected>8</option><option>12</option><option>16</option>
@@ -45,46 +49,70 @@
       speechSynthesis.speak(utterance);
     }
 
-    canvas.addEventListener('mousedown', e => { drawing=true; draw(e); });
-    canvas.addEventListener('mouseup', ()=> drawing=false);
-    canvas.addEventListener('mouseout', ()=> drawing=false);
-    canvas.addEventListener('mousemove', draw);
+    function getPos(evt) {
+      const rect = canvas.getBoundingClientRect();
+      if (evt.touches) {
+        return {
+          x: evt.touches[0].clientX - rect.left,
+          y: evt.touches[0].clientY - rect.top
+        };
+      } else {
+        return {
+          x: evt.clientX - rect.left,
+          y: evt.clientY - rect.top
+        };
+      }
+    }
 
-    function draw(e){
-      if(!drawing) return;
+    function startDraw(evt) {
+      drawing = true;
+      const pos = getPos(evt);
+      ctx.beginPath();
+      ctx.moveTo(pos.x, pos.y);
+      evt.preventDefault();
+    }
+
+    function draw(evt) {
+      if (!drawing) return;
+      const pos = getPos(evt);
       ctx.lineWidth = erasing ? 20 : parseInt(sizePicker.value);
       ctx.lineCap = "round";
       ctx.strokeStyle = erasing ? "#fff" : colorPicker.value;
-
-      const rect = canvas.getBoundingClientRect();
-      ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+      ctx.lineTo(pos.x, pos.y);
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
-
-      // rudimentary recognition: if a single character is drawn and mouse up quickly, try to guess
+      ctx.moveTo(pos.x, pos.y);
+      evt.preventDefault();
     }
 
-    // Clear path on mouseup for recognition
-    canvas.addEventListener('mouseup', () => {
-      ctx.beginPath();
-      // Placeholder recognition: simulate recognizing single letters/digits based on random pick (demo)
-      // In production, integrate a handwriting recognition library like tensorflow.js
-      // Here, we just speak "number" or "letter drawn" for demonstration
-      speak("Drawing completed");
-    });
+    function endDraw() {
+      if (drawing) {
+        drawing = false;
+        ctx.beginPath();
+        speak("Drawing completed");
+      }
+    }
 
-    document.getElementById('eraser').onclick = ()=> { erasing = !erasing; };
-    document.getElementById('clearBoard').onclick = ()=> {
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-    };
+    // Mouse events
+    canvas.addEventListener('mousedown', startDraw);
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', endDraw);
+    canvas.addEventListener('mouseout', endDraw);
+
+    // Touch events
+    canvas.addEventListener('touchstart', startDraw, { passive:false });
+    canvas.addEventListener('touchmove', draw, { passive:false });
+    canvas.addEventListener('touchend', endDraw);
+
+    document.getElementById('eraser').onclick = () => { erasing = !erasing; };
+    document.getElementById('clearBoard').onclick = () => ctx.clearRect(0,0,canvas.width,canvas.height);
 
     toggleSpeakBtn.onclick = () => {
       speakEnabled = !speakEnabled;
       toggleSpeakBtn.textContent = speakEnabled ? "🔊 Speak: On" : "🔇 Speak: Off";
     };
 
-    // Drag and drop image support
+    // Drag and drop image (desktop)
     canvas.addEventListener('dragover', e => e.preventDefault());
     canvas.addEventListener('drop', e => {
       e.preventDefault();
@@ -100,14 +128,25 @@
     document.getElementById('saveBtn').onclick = () => {
       const dataURL = canvas.toDataURL('image/png');
       const a = document.createElement('a');
-      a.href = dataURL;
       const fileName = `drawing-${Date.now()}.png`;
+      a.href = dataURL;
       a.download = fileName;
       a.click();
       const li = document.createElement('div');
       li.textContent = `Saved: ${fileName}`;
       fileList.appendChild(li);
     };
+
+    // Resize canvas on mobile rotation
+    window.addEventListener('resize', () => {
+      if (window.innerWidth < 768) {
+        canvas.width = window.innerWidth * 0.95;
+        canvas.height = window.innerHeight * 0.6;
+      } else {
+        canvas.width = 900;
+        canvas.height = 500;
+      }
+    });
   </script>
 </body>
 </html>
